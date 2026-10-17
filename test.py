@@ -3,23 +3,24 @@ import datetime
 import pandas as pd
 from mariadb.constants import INDICATOR
 from datetime import timedelta
-import akshare as ak
+from dateutil.relativedelta import relativedelta
+#import akshare as ak
 import tushare as ts
-import baostock as bs
+#import baostock as bs
 import time
 import zone_node_class as znc
 import trade as td
 import copy as cp
-pro = ts.pro_api()
-
+import code
 #获取浦发银行60000.SH的实时分钟数据
 #df = pro.rt_min(ts_code='600000.SH,600008.SH', freq='5MIN')
 #print(df)
+table_struct = "trade_date date primary key, open float, high float, low float, close float, pct_ch float, vol float"
 longin_mariadb_name = "root"
 longin_mariadb_password = "123456"
 db_name = "test"
-all_stock_list = [] #[("symbol","name"，"ts_code")]
-trade_date = []
+all_stock_list = [] #[("symbol","name"，"ts_code","idustre"行业,"list_date"上市日期)]
+trade_date = []    #[("20260101",0 or 1)]
 #stock_struct = [(code,trade_date,open,high,low,close,vol,pct_chg)]
 stock_struct_list=[]
 zone_node_dic_of_all_stock_list={} #{'symbol':zone_node}
@@ -29,6 +30,8 @@ slash_value_dic_divide_group = {}        #{symbol:[top[],botton[(count,,stp,[])]
 slash_node_dic={} #{symbol:[slash_node,slash_botton]}
 init_true = 0
 update_true = 1
+init_start_date="20200101" #设制获取股的初始日期
+update_name="date.txt"
 
 def sql_run(sql:str,data: list =0)->list:
    
@@ -72,22 +75,72 @@ ts_api = ts.pro_api('ffdc91c27551a9e7ed1294e2e9132e40f5433d8c3622973f60b0b154')
 #lg = bs.login()
 # 显示登陆返回信息
 #print('login respond error_code:'+lg.error_code)
-#rint('login respond  error_msg:'+lg.error_msg)
+#print('login respond  error_msg:'+lg.error_msg)
+def get_trade_date()->list:
+    global trade_date
+    start=(datetime.date.today()).strftime("%Y")+"0101"
+    end=(datetime.date.today()).strftime("%Y") + "1231"     #+relativedelta(years=1))).strftime("%Y")+"1231"
+    date=ts_api.query('trade_cal',start_date=start,end_date=end)[["cal_date","is_open"]].to_dict(orient="list")
+    t0=list(date["cal_date"])
+    t1=list(date["is_open"])
+    index=0
+    for vle in t0:
+        trade_date.append((vle,t1[0]))
+        index=index+1
+    #print(trade_date)
+    return trade_date
+def get_all_stock_name():
+    global all_stock_list
+    data = ts_api.query('stock_basic', exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
+    data= data[["symbol","name","ts_code","industry","list_date"]].to_dict(orient="list")
+    t0=list(data["symbol"])
+    t1=list(data["name"])
+    t2=list(data["ts_code"])
+    t3=list(data["industry"])
+    t4=list(data["list_date"])
+    index=0
+    for vl in t0:
+        all_stock_list.append((t0[index],t1[index],t2[index],t3[index],t4[index]))
+        index=index+1
+        #print(all_stock_list)
+def init_stock_dbtable():
+    global db_name
+    global all_stock_list
+    global table_struct
+    with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("show databases")
+            name= cursor.fetchall()
+            db_exist = 0
+            for nm in name:
+                if db_name == nm[0]:
+                    db_exist = 1
+                    break
+            if db_exist==1:
+                cursor.execute(f"use {db_name}")
+            if db_exist==0:
+                cursor.execute(f"create database {db_name}")
+            cursor.execute(f"use {db_name}")
+            for vle in all_stock_list:
+                name_table = "a" + vle[0]
+                cursor.execute(f"create table if not exists {name_table}({table_struct})")
+                #print(name_table)
+        conn.commit()
+    pass
 #STOCK_CODE="000006.SZ",START_DATE="20200101"....
 def get_stock_data_start_end(stock_code,start,end)->dict:
     stock_data=[]
     data={}
-    
     data_temp = ts_api.daily(ts_code=stock_code,start_date=start,end_date=end)
-    temp = data_temp[["ts_code","trade_date","open","high","low","close","pct_chg","vol"]].to_dict()
-    t0 = list(temp["ts_code"].values())
-    t1 = list(temp["trade_date"].values())
-    t2 = list(temp["open"].values())
-    t3 =  list(temp["high"].values())
-    t4 = list(temp["low"].values())
-    t5 = list(temp["close"].values())
-    t6 =   list(temp["pct_chg"].values())
-    t7 =  list(temp["vol"].values())
+    temp = data_temp[["ts_code","trade_date","open","high","low","close","pct_chg","vol"]].to_dict(orient="list")
+    t0 = list(temp["ts_code"])
+    t1 = list(temp["trade_date"])
+    t2 = list(temp["open"])
+    t3 = list(temp["high"])
+    t4 = list(temp["low"])
+    t5 = list(temp["close"])
+    t6 = list(temp["pct_chg"])
+    t7 = list(temp["vol"])
     c = 0
     for tt in t1:
         if str(t6[c]) !="nan":
@@ -108,28 +161,111 @@ def get_stock_data_start_end(stock_code,start,end)->dict:
                 temp_list.append((tt[1],tt[2],tt[3],tt[4],tt[5],tt[6],tt[7]))
         data[code]=temp_list
     return data
-####@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-def get_data_start__end_from_table_of_db(name,start,end)
+
+def init_all_table_data():
+    global all_stock_list
+    global init_start_date
+    code=""
+    for vle in all_stock_list:
+        code =code + vle[2]+","
+    init_year =  init_start_date[0:4]
+    today_year = (datetime.date.today()).strftime("%Y")
+    if int(today_year) < int(init_year):
+        print("init_year too big")
+        return 0
+    if int(today_year) == int(init_year):
+        if int(init_start_date[4:6]) > int(datetime.date.today().strftime("%m")):
+            print("init_month too big")
+            return 0
+    if int(today_year) == int(init_year):
+        if int(init_start_date[4:6]) == int(datetime.date.today().strftime("%m")):
+            if int(init_start_date[6:8]) > int(datetime.date.today().strftime("%d")):
+                print("init_date too big")
+                return 0
+    count_year=int(today_year)-int(init_year)+1
+    with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(f"use {db_name}")
+            count_1=0
+            start_date=""
+            end_date=""
+            while count_1 < count_year:
+                if count_year==1:
+                    start_date =  init_start_date
+                    end_date= (datetime.date.today()).strftime("%Y%m%d")
+                if count_year>2:
+                    if count_1==0:
+                        start_date=init_start_date
+                        end_date=init_start_date[0:4]+"1231"
+                    if count_1 >= 1:
+                        start_date = str(int(end_date[0:4]) + 1)+"0101"
+                        if count_1 != (count_year-1):
+                            end_date = start_date[0:4]+"1231"
+                        else:
+                            end_date=(datetime.date.today()).strftime("%Y%m%d")
+                count_2=0
+                len_1 = (len(code))/10
+                ts_code=""
+                code_1 =code
+                #print(start_date,end_date)
+                while count_2 < len_1:
+                    if (count_2+20) < len_1:
+                        count =  20*10
+                        ts_code=code_1[0:count]
+                        #print(ts_code)
+                        code_1 = code_1[count:]
+                        #print(code_1)
+                    else:
+                        ts_code=code_1
+                        #print(ts_code)
+                    temp_dict_data = get_stock_data_start_end(ts_code,start_date,end_date)
+                    for ky,vl in temp_dict_data.items():
+                        cursor.execute(f"create table if not exists a{ky}({table_struct})")
+                        sql = f"insert into a{ky} (trade_date,open,high,low,close,pct_ch,vol) values (%s,%s,%s,%s,%s,%s,%s)"
+                        print(sql)
+                        cursor.executemany(sql,vl)
+                    conn.commit()
+                    count_2 = count_2 + 20
+                count_1 = count_1 +1
+                #print(count_1)
+            with open(f"{update_name}","a+",encoding='utf-8') as ff:
+                ff.write(f"\n{end_date}")
+        conn.commit()
+
+def update_all_stock_data():
+    global init_start_date
+    today =(datetime.date.today()).strftime("%Y%m%d")
+    data_cru=''
+    with open(f"{update_name}","a+",encoding='utf-8') as ff:
+        ff.seek(0)
+        temp = ff.readline()
+        while temp !="":
+            if temp !="":
+                data_cru=temp
+            temp = ff.readline()
+        data_cru = data_cru[0:6] + str(int(data_cru[6:8])+1)
+    if int(today[0:4]) < int(data_cru[0:4]):
+        print("UPDATE_ALL_STOCK_DATA year不需要更新")
+        return 0
+    if (int(today[4:6]) < int(data_cru[4:6])) and (int(today[0:4]) == int(data_cru[0:4])) :
+        print("UPDATE_ALL_STOCK_DATA mauth不需要更新")
+        return 0
+    if (int(today[6:8]) < int(data_cru[6:8])) and (int(today[4:6]) < int(data_cru[4:6])) and (int(today[0:4]) == int(data_cru[0:4])):
+        print("UPDATE_ALL_STOCK_DATA date不需要更新")
+        return 0
+    init_start_date=data_cru
+    init_all_table_data()
+    print("UPDATE_ALL_STOCK_DATA更新完成")
+    print((data_cru, today))
+    return 0
+
+####tscode="000001"start="20201001" end="230101"
+def get_data_start__end_from_table_of_db(tscode,start,end)->list:
+    with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
+        with conn.cursor() as cursor:
                 cursor.execute(f"show tables")
                 all_stock_table_name = cursor.fetchall()
-                for it,vl in data_dict.items():
-                    code_id = it
-                    find_flase = False
-                    for item1 in all_stock_table_name:
-                        if code_id == (item1[0])[1:]:
-                            find_flase = True
-                            sql = "INSERT INTO a"+f"{code_id}"+"(trade_date,open,high,low,close,pct_ch,vol) VALUES (%s, %s,%s,%s,%s,%s,%s)"
-                            cursor.executemany(sql,vl)
-                            #print(slt_data[0][0])
-                            break
-                    if not find_flase:
-                        create_stock_dbtable(code_id)
-                        sql = "INSERT INTO a"+f"{code_id}"+"(trade_date,open,high,low,close,pct_ch,vol) VALUES (%s, %s,%s,%s,%s,%s,%s)"
-                        cursor.executemany(sql,vl)        
-            conn.commit()
-    with open("date.txt","a+",encoding="utf-8") as ff:
-        ff.seek(0,2)
-        ff.write(f"\n{today_date}")
+        conn.commit()
 #构建区间链表
 def zone_list(stock_code:str)->znc.ZoneNode:
     with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
@@ -360,10 +496,10 @@ def support_and_pressure_of_zone_node():
         support_and_pressure_dic[key] = temp_list
 def set_update():
     global update_true
-    get_trade_date()
+    trade_date=get_trade_date()
     temp = str(datetime.datetime.now().strftime("%Y%m%d"))
     time = int (datetime.datetime.now().strftime("%H"))
-    with open("date.txt","a+",encoding="utf-8") as f:
+    with open(f"{update_name}","a+",encoding="utf-8") as f:
         f.seek(0)
         line = f.readlines()
         if len(line) == 0:
@@ -805,7 +941,22 @@ def main():
     ##trade.py
     print("run td.login-------->")  
     #td.login()
+#get_all_stock_name()
+#init_stock_dbtable()
+#init_all_table_data()
+#print((2024%3))
+#   
+#pdate_all_stock_data()
+"""
+with open("date1.txt","r",encoding="utf-8") as ff:
+    ff.seek(0,2)
+    last_line=ff.readline().decode("utf-8").strip()
+    print(last_line)
+    """
+#print(get_stock_data_start_end("000001.SZ,000002.SZ,","20200101","20261008"))
+
 main()
+"""
 #get_average_vol("600584",1)
 print(find_count_for_two_slash_value())
 
@@ -864,3 +1015,4 @@ zone=max_value-min_value
 
 print((temp-min_value)/zone)
 print(cnt)
+"""
