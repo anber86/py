@@ -18,7 +18,7 @@ import code
 table_struct = "trade_date date primary key, open float, high float, low float, close float, pct_ch float, vol float"
 longin_mariadb_name = "root"
 longin_mariadb_password = "123456"
-db_name = "test"
+db_name = "test1"
 all_stock_list = [] #[("symbol","name"，"ts_code","idustre"行业,"list_date"上市日期)]
 trade_date = []    #[("20260101",0 or 1)]
 #stock_struct = [(code,trade_date,open,high,low,close,vol,pct_chg)]
@@ -31,10 +31,10 @@ slash_node_dic={} #{symbol:[slash_node,slash_botton]}
 init_true = 0
 update_true = 1
 init_start_date="20200101" #设制获取股的初始日期
-update_name="date.txt"
+update_name="date1.txt"
+not_buy_plate="30,68,92,"
 
 def sql_run(sql:str,data: list =0)->list:
-   
     with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
         with conn.cursor() as cursor:
             cursor.execute(f"use {db_name}")
@@ -50,7 +50,7 @@ def sql_run(sql:str,data: list =0)->list:
                         print("SQL_RUN错误",sql)
             temp_data = cursor.fetchall()
         conn.commit()
-    return temp_data    
+    return temp_data
 
 def sql_run_void(sql:str,data: list =0):
    
@@ -243,7 +243,8 @@ def update_all_stock_data():
             if temp !="":
                 data_cru=temp
             temp = ff.readline()
-        data_cru = data_cru[0:6] + str(int(data_cru[6:8])+1)
+        data_cru = datetime.datetime.strptime(data_cru,"%Y%m%d")
+        data_cru =(data_cru + datetime.timedelta(days=1)).strftime("%Y%m%d")
     if int(today[0:4]) < int(data_cru[0:4]):
         print("UPDATE_ALL_STOCK_DATA year不需要更新")
         return 0
@@ -258,22 +259,33 @@ def update_all_stock_data():
     print("UPDATE_ALL_STOCK_DATA更新完成")
     print((data_cru, today))
     return 0
-
-####tscode="000001"start="20201001" end="230101"
-def get_data_start__end_from_table_of_db(tscode,start,end)->list:
+#tscode="000001"start="20201001" end="230101"
+def get_data_start_end_from_db_table(tscode,start,end)->list:
+    global db_name
+    tscode= 'a'+ tscode
+    data=[]
     with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
         with conn.cursor() as cursor:
+                cursor.execute(f"use {db_name}")
                 cursor.execute(f"show tables")
                 all_stock_table_name = cursor.fetchall()
+                for val in all_stock_table_name:
+                    if tscode == val[0]:
+                        cursor.execute(f"select * from {tscode} where trade_date >= {start} AND trade_date <= {end}" )
+                        data=cursor.fetchall()
         conn.commit()
-#构建区间链表
-def zone_list(stock_code:str)->znc.ZoneNode:
+    return data
+#构建区间链表stock_code="000001",start_date="20250101",end_date="20260101"
+def zone_list(stock_code:str,start_date,end_date)->znc.ZoneNode:
     with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
         with conn.cursor() as cursor:
             cursor.execute(f"use {db_name}")
-            cursor.execute(f"show tables")
-            sql = "select trade_date,open,high,low,close,pct_ch,vol from a" + f"{stock_code}" + " order by trade_date asc"
-            data_stock_code = sql_run(sql)
+            #cursor.execute(f"show tables")
+            sql = "select trade_date,open,high,low,close,pct_ch,vol from a" + f"{stock_code} where trade_date >= {start_date} AND trade_date <= {end_date}" + " order by trade_date asc"
+            cursor.execute(sql)
+            data_stock_code = cursor.fetchall()
+            #print(data_stock_code)
+        conn.commit()
     if len(data_stock_code) < 1:
         return None
     head = znc.ZoneNode()
@@ -304,11 +316,11 @@ def zone_list(stock_code:str)->znc.ZoneNode:
                         node_index = 0
                         flage_up = 1
                         flage_down = 0
-                        flage_turn = 1 
+                        flage_turn = 1
                         up_top_flage = 1
                         curr_node.top_flage = 0
                         ##以下三个变量用于大于百分三的
-                        node_index = 0 
+                        node_index = 0
                         temp_save_vl = 0
                         temp_i = 0
             elif((temp_node_close - curr_node_close)/curr_node_close) >0.03:
@@ -442,18 +454,20 @@ def optimize_zone_node(node:znc.ZoneNode)->znc.ZoneNode:
         if next1 == None:
             return head
     return head
-def zone_list_in_list(code:list)->dict:
+def zone_list_in_list(code:list,start_date,end_date)->dict:
     temp_dict = dict()
     for i in range(len(code)):
-        temp_dict[code[i]] = optimize_zone_node(zone_list(code[i]))
+        temp_dict[code[i]] = optimize_zone_node(zone_list(code[i],start_date,end_date))
     return temp_dict
-def init_zone_list_of_all_stock__list():
+def init_zone_list_of_all_stock__list(year_count=4):
     global zone_node_dic_of_all_stock_list   #{'symbol':zone_node}
     global all_stock_list  #all_stock_list[("symbol","name"，"ts_code")]
+    end_date = (datetime.date.today()).strftime("%Y%m%d")
+    start_date= ((datetime.datetime.strptime(end_date,"%Y%m%d")) - relativedelta(years=year_count)).strftime("%Y%m%d")
     temp_code=[]
     for i in all_stock_list:
         temp_code.append(i[0])
-    zone_node_dic_of_all_stock_list = zone_list_in_list(temp_code)
+    zone_node_dic_of_all_stock_list = zone_list_in_list(temp_code,start_date,end_date)
 
 def connect_same_zone_node_of_close(node:znc.ZoneNode)->znc.ZoneNode: 
     zone_node = node
@@ -785,6 +799,23 @@ def find_count_for_two_slash_value()->list:
                     continue
         
     return id
+
+def delete_not_buy_plate(stock)->list:
+    global not_buy_plate
+    count = len(not_buy_plate)/3
+    temp=not_buy_plate
+    data=[]
+    while count>0:
+        count=count-1
+        name=temp[0:3][0:2]
+        temp=temp[3:]
+        for vla in stock:
+            temp1=vla[0:2]
+            if name != temp1:
+                data.append(vla)
+        stock=data
+        data=[]
+    return stock
 #获取DT过去ct天的平均交易量
 #STOCK_CODE代码，指定DT日期开始CT日的平均交易量。
 #dt="20260101" fd= 0 or 1
@@ -940,7 +971,8 @@ def main():
     all_top_botton_with_slash_node()
     ##trade.py
     print("run td.login-------->")  
-    #td.login()
+    #td.login(
+
 #get_all_stock_name()
 #init_stock_dbtable()
 #init_all_table_data()
@@ -956,16 +988,19 @@ with open("date1.txt","r",encoding="utf-8") as ff:
 #print(get_stock_data_start_end("000001.SZ,000002.SZ,","20200101","20261008"))
 
 main()
+print(len(delete_not_buy_plate(find_count_for_two_slash_value())))
+#get_data_start_end_from_db_table("000001","20231001","20231012")
 """
 #get_average_vol("600584",1)
 print(find_count_for_two_slash_value())
-
-temp2=temp1 = optimize_zone_node(zone_list("600171"))
+"""
+"""
+temp2=temp1 = optimize_zone_node(zone_list("600171","20241228","20260201"))
 ls=[]
 while temp1!=None:
     if temp1.top_flage == 0:
         ls.append(temp1)
-    temp1 = temp1.down_node
+    temp1 = temp1.down_node 
 ls1=[]
 cnt = 0
 for vl in ls:
@@ -994,25 +1029,4 @@ ls=head
 while ls!=None:
     print((ls.top_vlue.close,ls.top_vlue.date))
     ls=ls.slash_node_next
-
-ls=head
-sort_list=sort_structure_node_with_slash_group(cp.deepcopy(head))
-for vlue in sort_list:
-    print(vlue.top_vlue.date)
-data=get_data_start__end_from_table_of_db("600171","20260807","20260807")
-print(data)
-temp = data[0][4]
-cnt=0
-for temp1 in sort_list:
-    value=temp1.top_vlue.close
-    if temp>=value:
-        break
-    cnt= cnt+1
-count_index= len(sort_list)
-max_value=sort_list[0].top_vlue.close
-min_value=sort_list[-1].top_vlue.close
-zone=max_value-min_value
-
-print((temp-min_value)/zone)
-print(cnt)
 """
