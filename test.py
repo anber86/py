@@ -31,9 +31,10 @@ slash_node_dic={} #{symbol:[slash_node,slash_botton]}
 init_true = 0
 update_true = 1
 init_start_date="20200101" #设制获取股的初始日期
+update_name="date1.txt"
+not_buy_plate="30,68,92,"
 
 def sql_run(sql:str,data: list =0)->list:
-   
     with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
         with conn.cursor() as cursor:
             cursor.execute(f"use {db_name}")
@@ -49,7 +50,7 @@ def sql_run(sql:str,data: list =0)->list:
                         print("SQL_RUN错误",sql)
             temp_data = cursor.fetchall()
         conn.commit()
-    return temp_data    
+    return temp_data
 
 def sql_run_void(sql:str,data: list =0):
    
@@ -84,7 +85,7 @@ def get_trade_date()->list:
     t1=list(date["is_open"])
     index=0
     for vle in t0:
-        trade_date.append(vle,t1[0])
+        trade_date.append((vle,t1[0]))
         index=index+1
     #print(trade_date)
     return trade_date
@@ -125,8 +126,6 @@ def init_stock_dbtable():
                 cursor.execute(f"create table if not exists {name_table}({table_struct})")
                 #print(name_table)
         conn.commit()
-    pass
-def update_all_stock_data():
     pass
 #STOCK_CODE="000006.SZ",START_DATE="20200101"....
 def get_stock_data_start_end(stock_code,start,end)->dict:
@@ -218,47 +217,80 @@ def init_all_table_data():
                         #print(code_1)
                     else:
                         ts_code=code_1
-                        print(ts_code)
+                        #print(ts_code)
                     temp_dict_data = get_stock_data_start_end(ts_code,start_date,end_date)
-                    print(temp_dict_data)
+                    for ky,vl in temp_dict_data.items():
+                        cursor.execute(f"select * from a{ky} where trade_date >= {start_date}")
+                        temp = cursor.fetchall()
+                        if len(temp)>0:
+                            continue
+                        cursor.execute(f"create table if not exists a{ky}({table_struct})")
+                        sql = f"insert into a{ky} (trade_date,open,high,low,close,pct_ch,vol) values (%s,%s,%s,%s,%s,%s,%s)"
+                        print(sql)
+                        cursor.executemany(sql,vl)
+                    conn.commit()
                     count_2 = count_2 + 20
                 count_1 = count_1 +1
                 #print(count_1)
+            with open(f"{update_name}","a+",encoding='utf-8') as ff:
+                ff.write(f"\n{end_date}")
         conn.commit()
-####@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-def get_data_start__end_from_table_of_db(name,start,end):
+
+def update_all_stock_data():
+    global init_start_date
+    today =(datetime.date.today()).strftime("%Y%m%d")
+    data_cru=''
+    with open(f"{update_name}","a+",encoding='utf-8') as ff:
+        ff.seek(0)
+        temp = ff.readline()
+        while temp !="":
+            if temp !="":
+                data_cru=temp
+            temp = ff.readline()
+        data_cru = datetime.datetime.strptime(data_cru,"%Y%m%d")
+        data_cru =(data_cru + datetime.timedelta(days=1)).strftime("%Y%m%d")
+    if int(today[0:4]) < int(data_cru[0:4]):
+        print("UPDATE_ALL_STOCK_DATA year不需要更新")
+        return 0
+    if (int(today[4:6]) < int(data_cru[4:6])) and (int(today[0:4]) == int(data_cru[0:4])) :
+        print("UPDATE_ALL_STOCK_DATA mauth不需要更新")
+        return 0
+    if (int(today[6:8]) < int(data_cru[6:8])) and (int(today[4:6]) < int(data_cru[4:6])) and (int(today[0:4]) == int(data_cru[0:4])):
+        print("UPDATE_ALL_STOCK_DATA date不需要更新")
+        return 0
+    init_start_date=data_cru
+    init_stock_dbtable()
+    init_all_table_data()
+    print("UPDATE_ALL_STOCK_DATA更新完成")
+    print((data_cru, today))
+    return 0
+#tscode="000001"start="20201001" end="230101"
+def get_data_start_end_from_db_table(tscode,start,end)->list:
+    global db_name
+    tscode= 'a'+ tscode
+    data=[]
     with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
         with conn.cursor() as cursor:
+                cursor.execute(f"use {db_name}")
                 cursor.execute(f"show tables")
                 all_stock_table_name = cursor.fetchall()
-
-                for it,vl in data_dict.items():
-                    code_id = it
-                    find_flase = False
-                    for item1 in all_stock_table_name:
-                        if code_id == (item1[0])[1:]:
-                            find_flase = True
-                            sql = "INSERT INTO a"+f"{code_id}"+"(trade_date,open,high,low,close,pct_ch,vol) VALUES (%s, %s,%s,%s,%s,%s,%s)"
-                            cursor.executemany(sql,vl)
-                            #print(slt_data[0][0])
-                            break
-                    if not find_flase:
-                        create_stock_dbtable(code_id)
-                        sql = "INSERT INTO a"+f"{code_id}"+"(trade_date,open,high,low,close,pct_ch,vol) VALUES (%s, %s,%s,%s,%s,%s,%s)"
-                        cursor.executemany(sql,vl)
-            
+                for val in all_stock_table_name:
+                    if tscode == val[0]:
+                        cursor.execute(f"select * from {tscode} where trade_date >= {start} AND trade_date <= {end}" )
+                        data=cursor.fetchall()
         conn.commit()
-    with open("date.txt","a+",encoding="utf-8") as ff:
-        ff.seek(0,2)
-        ff.write(f"\n{today_date}")
-#构建区间链表
-def zone_list(stock_code:str)->znc.ZoneNode:
+    return data
+#构建区间链表stock_code="000001",start_date="20250101",end_date="20260101"
+def zone_list(stock_code:str,start_date,end_date)->znc.ZoneNode:
     with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
         with conn.cursor() as cursor:
             cursor.execute(f"use {db_name}")
-            cursor.execute(f"show tables")
-            sql = "select trade_date,open,high,low,close,pct_ch,vol from a" + f"{stock_code}" + " order by trade_date asc"
-            data_stock_code = sql_run(sql)
+            #cursor.execute(f"show tables")
+            sql = "select trade_date,open,high,low,close,pct_ch,vol from a" + f"{stock_code} where trade_date >= {start_date} AND trade_date <= {end_date}" + " order by trade_date asc"
+            cursor.execute(sql)
+            data_stock_code = cursor.fetchall()
+            #print(data_stock_code)
+        conn.commit()
     if len(data_stock_code) < 1:
         return None
     head = znc.ZoneNode()
@@ -289,11 +321,11 @@ def zone_list(stock_code:str)->znc.ZoneNode:
                         node_index = 0
                         flage_up = 1
                         flage_down = 0
-                        flage_turn = 1 
+                        flage_turn = 1
                         up_top_flage = 1
                         curr_node.top_flage = 0
                         ##以下三个变量用于大于百分三的
-                        node_index = 0 
+                        node_index = 0
                         temp_save_vl = 0
                         temp_i = 0
             elif((temp_node_close - curr_node_close)/curr_node_close) >0.03:
@@ -427,18 +459,20 @@ def optimize_zone_node(node:znc.ZoneNode)->znc.ZoneNode:
         if next1 == None:
             return head
     return head
-def zone_list_in_list(code:list)->dict:
+def zone_list_in_list(code:list,start_date,end_date)->dict:
     temp_dict = dict()
     for i in range(len(code)):
-        temp_dict[code[i]] = optimize_zone_node(zone_list(code[i]))
+        temp_dict[code[i]] = optimize_zone_node(zone_list(code[i],start_date,end_date))
     return temp_dict
-def init_zone_list_of_all_stock__list():
+def init_zone_list_of_all_stock__list(year_count=3):
     global zone_node_dic_of_all_stock_list   #{'symbol':zone_node}
     global all_stock_list  #all_stock_list[("symbol","name"，"ts_code")]
+    end_date = (datetime.date.today()).strftime("%Y%m%d")
+    start_date= ((datetime.datetime.strptime(end_date,"%Y%m%d")) - relativedelta(years=year_count)).strftime("%Y%m%d")
     temp_code=[]
     for i in all_stock_list:
         temp_code.append(i[0])
-    zone_node_dic_of_all_stock_list = zone_list_in_list(temp_code)
+    zone_node_dic_of_all_stock_list = zone_list_in_list(temp_code,start_date,end_date)
 
 def connect_same_zone_node_of_close(node:znc.ZoneNode)->znc.ZoneNode: 
     zone_node = node
@@ -467,10 +501,12 @@ def connect_same_close_of_all_zone_node():
     for key,val in zone_node_dic_of_all_stock_list.items():
         if val is not None:
             connect_same_zone_node_of_close(val)
+
 def support_and_pressure_of_zone_node():
     global zone_node_dic_of_all_stock_list
     global support_and_pressure_dic
     connect_same_close_of_all_zone_node()
+    first_val=0
     for key,node in zone_node_dic_of_all_stock_list.items():
         temp_list =[]
         while node is not None:
@@ -478,13 +514,23 @@ def support_and_pressure_of_zone_node():
                 temp_list.append((node.close,node.date,node))
             node = node.down_node
         temp_list.sort()
-        support_and_pressure_dic[key] = temp_list
+        temp=[]
+        for val in temp_list:
+            if first_val==0:
+                first_val=val[0]
+                temp.append(val)
+                continue
+            #5个点内的看成个
+            if abs(first_val-val[0])/first_val > 0.05:
+                temp.append(val)
+                first_val=val[0]
+        support_and_pressure_dic[key] = temp
 def set_update():
     global update_true
     trade_date=get_trade_date()
     temp = str(datetime.datetime.now().strftime("%Y%m%d"))
     time = int (datetime.datetime.now().strftime("%H"))
-    with open("date.txt","a+",encoding="utf-8") as f:
+    with open(f"{update_name}","a+",encoding="utf-8") as f:
         f.seek(0)
         line = f.readlines()
         if len(line) == 0:
@@ -770,6 +816,23 @@ def find_count_for_two_slash_value()->list:
                     continue
         
     return id
+
+def delete_not_buy_plate(stock)->list:
+    global not_buy_plate
+    count = len(not_buy_plate)/3
+    temp=not_buy_plate
+    data=[]
+    while count>0:
+        count=count-1
+        name=temp[0:3][0:2]
+        temp=temp[3:]
+        for vla in stock:
+            temp1=vla[0:2]
+            if name != temp1:
+                data.append(vla)
+        stock=data
+        data=[]
+    return stock
 #获取DT过去ct天的平均交易量
 #STOCK_CODE代码，指定DT日期开始CT日的平均交易量。
 #dt="20260101" fd= 0 or 1
@@ -926,69 +989,5 @@ def main():
     ##trade.py
     print("run td.login-------->")  
     #td.login()
-get_all_stock_name()
-init_stock_dbtable()
-init_all_table_data()
-#print((2024%3))
-#print(get_stock_data_start_end("000001.SZ,000002.SZ,","20200101","20261008"))
-"""
+
 main()
-#get_average_vol("600584",1)
-print(find_count_for_two_slash_value())
-
-temp2=temp1 = optimize_zone_node(zone_list("600171"))
-ls=[]
-while temp1!=None:
-    if temp1.top_flage == 0:
-        ls.append(temp1)
-    temp1 = temp1.down_node
-ls1=[]
-cnt = 0
-for vl in ls:
-    if cnt == 0:
-        cnt = vl.close
-        ls1.append(vl)
-    if cnt != 0:
-        if abs(vl.close-cnt)/cnt > 0.05:
-            ls1.append(vl)
-            cnt=vl.close
-print(ls1)
-ls2=slash_divide_into_group(ls1)
-print("ssssssssssssssssss")
-print(ls2)
-head=ls=ls3=structure_node_with_slash_group(ls2)
-while ls3!=None:
-    index=ls3.top_index
-    ls3.top_vlue=ls1[index]
-    ls3 = ls3.slash_node_next
-
-while ls!=None:
-    print((ls.top_index,ls.top_vlue))
-    print((ls.left_zone,ls.right_zone))
-    ls = ls.slash_node_next
-ls=head
-while ls!=None:
-    print((ls.top_vlue.close,ls.top_vlue.date))
-    ls=ls.slash_node_next
-
-ls=head
-sort_list=sort_structure_node_with_slash_group(cp.deepcopy(head))
-for vlue in sort_list:
-    print(vlue.top_vlue.date)
-data=get_data_start__end_from_table_of_db("600171","20260807","20260807")
-print(data)
-temp = data[0][4]
-cnt=0
-for temp1 in sort_list:
-    value=temp1.top_vlue.close
-    if temp>=value:
-        break
-    cnt= cnt+1
-count_index= len(sort_list)
-max_value=sort_list[0].top_vlue.close
-min_value=sort_list[-1].top_vlue.close
-zone=max_value-min_value
-
-print((temp-min_value)/zone)
-print(cnt)
-"""
