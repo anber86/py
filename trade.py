@@ -1,6 +1,52 @@
 import win32api
 import win32gui
 import time
+import win32con 
+import win32process
+windows_handle=0
+def move_window_to_center(hwnd):
+    """
+    将指定句柄的窗口移动到屏幕中心
+    :param hwnd: 窗口句柄 int
+    """
+    # 获取窗口原始矩形 left,top,right,bottom
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    win_w = right - left
+    win_h = bottom - top
+
+    # 获取屏幕可用区域（排除任务栏）
+    screen_rect = win32gui.GetMonitorInfo(win32gui.MonitorFromWindow(hwnd))["Work"]
+    scr_w = screen_rect[2] - screen_rect[0]
+    scr_h = screen_rect[3] - screen_rect[1]
+
+    # 计算居中左上角坐标
+    x = screen_rect[0] + (scr_w - win_w) // 2
+    y = screen_rect[1] + (scr_h - win_h) // 2
+
+    # 移动窗口，不改变窗口大小
+    win32gui.SetWindowPos(
+        hwnd,
+        win32con.HWND_TOP,
+        x, y,
+        0, 0,
+        win32con.SWP_NOSIZE | win32con.SWP_NOZORDER
+    )
+def move_window_to_center():
+    pass
+def is_process_running():
+    pass
+def  enum_all_child():
+    pass
+def find_windows_classname():
+    pass
+def get_windows_by_pid():
+    pass
+def find_button():
+    pass
+def get_control_text():
+    pass
+def select_simulate_trade():
+    pass
 def query_untrade_stock():
     global windows_handle
     
