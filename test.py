@@ -19,7 +19,7 @@ table_struct = "trade_date date primary key, open float, high float, low float, 
 longin_mariadb_name = "root"
 longin_mariadb_password = "123456"
 db_name = "test1"
-all_stock_list = [] #[("symbol","name"，"ts_code","idustre"行业,"list_date"上市日期)]
+all_stock_list = [] #[["symbol","name"，"ts_code","idustre"行业,"list_date"上市日期,val 最新收盘价]]
 trade_date = []    #[("20260101",0 or 1)]
 #stock_struct = [(code,trade_date,open,high,low,close,vol,pct_chg)]
 stock_struct_list=[]
@@ -100,7 +100,7 @@ def get_all_stock_name():
     t4=list(data["list_date"])
     index=0
     for vl in t0:
-        all_stock_list.append((t0[index],t1[index],t2[index],t3[index],t4[index]))
+        all_stock_list.append([t0[index],t1[index],t2[index],t3[index],t4[index]])
         index=index+1
         #print(all_stock_list)
 def init_stock_dbtable():
@@ -128,25 +128,43 @@ def init_stock_dbtable():
         conn.commit()
     pass
 #STOCK_CODE="000006.SZ",START_DATE="20200101"....
-def get_stock_data_start_end(stock_code,start,end)->dict:
+def get_stock_data_start_end(start,end)->dict:
+    global all_stock_list
     stock_data=[]
     data={}
-    data_temp = ts_api.daily(ts_code=stock_code,start_date=start,end_date=end)
-    temp = data_temp[["ts_code","trade_date","open","high","low","close","pct_chg","vol"]].to_dict(orient="list")
-    t0 = list(temp["ts_code"])
-    t1 = list(temp["trade_date"])
-    t2 = list(temp["open"])
-    t3 = list(temp["high"])
-    t4 = list(temp["low"])
-    t5 = list(temp["close"])
-    t6 = list(temp["pct_chg"])
-    t7 = list(temp["vol"])
-    c = 0
-    for tt in t1:
-        if str(t6[c]) !="nan":
-            stock_data.append((t0[c],t1[c],t2[c],t3[c],t4[c],t5[c],t6[c],t7[c]))
-        c = c + 1
-    #print(stock_data)
+    st=datetime.datetime.strptime(start,"%Y%m%d")
+    ed=datetime.datetime.strptime(end,"%Y%m%d")
+    count= (ed-st).days
+    cnt=0
+    while cnt <= count:
+        st=datetime.datetime.strptime(start,"%Y%m%d")
+        temp=(st+timedelta(days=cnt)).strftime("%Y%m%d")
+        data_temp = ts_api.daily(trade_date=temp)
+        temp = data_temp[["ts_code","trade_date","open","high","low","close","pct_chg","vol"]].to_dict(orient="list")
+        t0 = list(temp["ts_code"])
+        t1 = list(temp["trade_date"])
+        t2 = list(temp["open"])
+        t3 = list(temp["high"])
+        t4 = list(temp["low"])
+        t5 = list(temp["close"])
+        t6 = list(temp["pct_chg"])
+        t7 = list(temp["vol"])
+        cnt=cnt+1
+        c = 0
+        for tt in t1:
+            if str(t6[c]) !="nan":
+                stock_data.append((t0[c],t1[c],t2[c],t3[c],t4[c],t5[c],t6[c],t7[c]))
+            c = c + 1
+        print(cnt)
+    for vl in all_stock_list:
+        temp_list=[]
+        for vl1 in stock_data:
+            if vl[2]==vl1[0]:
+                temp_list.append((vl1[1],vl1[2],vl1[3],vl1[4],vl1[5],vl1[6],vl1[7]))
+        data[vl[2][0:6]]=temp_list
+        #print(data)
+                
+    """
     while len(stock_code)>=9:
         temp = stock_code[0:9]
         code = temp[0:6]
@@ -160,6 +178,7 @@ def get_stock_data_start_end(stock_code,start,end)->dict:
             if tt[0]==temp:
                 temp_list.append((tt[1],tt[2],tt[3],tt[4],tt[5],tt[6],tt[7]))
         data[code]=temp_list
+        """
     return data
 
 def init_all_table_data():
@@ -203,11 +222,12 @@ def init_all_table_data():
                             end_date = start_date[0:4]+"1231"
                         else:
                             end_date=(datetime.date.today()).strftime("%Y%m%d")
-                count_2=0
-                len_1 = (len(code))/10
-                ts_code=""
-                code_1 =code
+                #count_2=0
+                #len_1 = (len(code))/10
+                #ts_code=""
+                #code_1 =code
                 #print(start_date,end_date)
+                """
                 while count_2 < len_1:
                     if (count_2+20) < len_1:
                         count =  20*10
@@ -217,25 +237,41 @@ def init_all_table_data():
                         #print(code_1)
                     else:
                         ts_code=code_1
-                        #print(ts_code)
-                    temp_dict_data = get_stock_data_start_end(ts_code,start_date,end_date)
-                    for ky,vl in temp_dict_data.items():
-                        cursor.execute(f"select * from a{ky} where trade_date >= {start_date}")
-                        temp = cursor.fetchall()
-                        if len(temp)>0:
-                            continue
-                        cursor.execute(f"create table if not exists a{ky}({table_struct})")
-                        sql = f"insert into a{ky} (trade_date,open,high,low,close,pct_ch,vol) values (%s,%s,%s,%s,%s,%s,%s)"
-                        print(sql)
-                        cursor.executemany(sql,vl)
-                    conn.commit()
-                    count_2 = count_2 + 20
+                """
+                temp_dict_data = get_stock_data_start_end(start_date,end_date)
+                #print(f"start_date:{start_date,end_date}")
+                for ky,vl in temp_dict_data.items():
+                    cursor.execute(f"select * from a{ky} where trade_date >= {start_date}")
+                    temp = cursor.fetchall()
+                    if len(temp)>0:
+                        continue
+                    cursor.execute(f"create table if not exists a{ky}({table_struct})")
+                    sql = f"insert into a{ky} (trade_date,open,high,low,close,pct_ch,vol) values (%s,%s,%s,%s,%s,%s,%s)"
+                    print(f"ky:{ky} vl:{vl} {sql}")
+                    cursor.executemany(sql,vl)
+                #conn.commit()
+                    #count_2 = count_2 + 20
                 count_1 = count_1 +1
                 #print(count_1)
             with open(f"{update_name}","a+",encoding='utf-8') as ff:
                 ff.write(f"\n{end_date}")
         conn.commit()
-
+###################################
+def update_all_stock_list_val():
+    global all_stock_list,db_name
+    with mariadb.connect(f"mariadb://{longin_mariadb_name}:{longin_mariadb_password}@localhost") as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(f"use {db_name}")
+            cnt = 0
+            for val in all_stock_list:
+                name = val[0]
+                cursor.execute(f"select * from a{name} order by trade_date desc limit 1" )
+                data=cursor.fetchall()
+                all_stock_list[cnt].append(data[0][4])
+                cnt = cnt +1
+        conn.commit()
+    #print(all_stock_list)
+    return 0
 def update_all_stock_data():
     global init_start_date
     today =(datetime.date.today()).strftime("%Y%m%d")
@@ -890,7 +926,7 @@ def get_appiont_date_data(stock_code:str,dt:str):
             data_stock_code = sql_run(sql)
     return data_stock_code
 
-#获取指定股票的指定天数的平均交易
+#获取指定股票的指定天数的平均交易量
 def get_average_vol(code,days):
     everager_data = []
     sql="select * from a"+code
@@ -923,7 +959,7 @@ def get_average_vol(code,days):
     print(everager_data)
     return everager_data
 
-#获取指定股票的指定天数的平均数据
+#获取指定股票的指定天数的平均价格
 def get_average_data(code,days):
     everager_data = []
     sql="select * from a"+code
@@ -958,8 +994,34 @@ def get_average_data(code,days):
 
 #return stock id list
 def select_stockA()->list:
-    
-
+    global all_stock_list,support_and_pressure_dic
+    temp = find_count_for_two_slash_value()
+    #print(f"find_count_for_two_slash_value:{len(temp)}")
+    lt=[]
+    #print(all_stock_list)
+    for id in temp:
+        if "30" in id:
+            continue
+        if "92" in id:
+            continue
+        if "68" in id:
+            continue
+        for val in all_stock_list:
+            if id == val[0]:
+                dt = int(val[4][0:4])
+                dy= int(str(datetime.datetime.now().strftime("%Y%m%d"))[0:4])
+                if dt-dy==0:
+                    #print(f"id:{id}---{val[4]}")
+                    break
+                if "*ST" in val[1]:
+                    break
+                if "ST" in val[1]:
+                    break
+                lt.append(id)
+    for id in lt:
+        temp = support_and_pressure_dic[f"{id}"]
+        print(f"id:{id}{temp}")      
+    return lt
     pass
 def select_stockB()->str:
     pass
@@ -976,6 +1038,8 @@ def main():
     if update_true == 1:
         print("run update_all_stock_data-------->")
         update_all_stock_data()
+    print("run update_all_stock_list_val--------->")
+    update_all_stock_list_val()
     print("run init_zone_list_of_all_stock_list--------->")
     init_zone_list_of_all_stock__list()
     print("run support_and_pressure_of_zone_node----------->")
@@ -987,7 +1051,9 @@ def main():
     print("run  all_top_botton_with_slash_node")
     all_top_botton_with_slash_node()
     ##trade.py
-    print("run td.login-------->")  
+    print("run td.login-------->")
+    #td.select_simulate_trade(td.trade_select)
     #td.login()
 
 main()
+select_stockA()

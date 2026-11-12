@@ -4,10 +4,13 @@ import time
 import win32con 
 import win32process
 import psutil
+import pyperclip
 import win32com.client
 from pywinauto import Application
 import ctypes
 from ctypes import wintypes
+import win32clipboard
+import subprocess
 windows_hand=[]
 pid=0
 trade_select=False
@@ -19,7 +22,6 @@ user32 = ctypes.windll.user32
 WM_SETTEXT = win32con.WM_SETTEXT        # 设置编辑框文字
 WM_GETTEXT = win32con.WM_GETTEXT        # 获取编辑框文字
 WM_GETTEXTLENGTH = win32con.WM_GETTEXTLENGTH
-
 CB_SELECTSTRING = 0x014C    # 查找并选中列表内匹配文本的项（配合WM_SETTEXT最常用）
 CB_GETCURSEL    = 0x0147    # 获取当前选中索引
 CB_SETCURSEL    = 0x0146    # 通过索引选中一项
@@ -155,8 +157,6 @@ def run_createprocess(exe_path:str):
         kernel32.CloseHandle(pi.hProcess)
         return True, pid
     return False, 0
-
-
 def is_running(proc_name:str) -> bool:
     for p in psutil.process_iter(['name']):
         try:
@@ -263,7 +263,53 @@ def send_keys_to_edit(hwnd, text):
     # 逐个字符发送
     for c in text:
         win32gui.SendMessage(hwnd, win32con.WM_CHAR, ord(c), 0)
-def select_simulate_trade(select=True):
+
+def get_clip_powershell():
+    """旁路读取，不受延迟渲染、剪贴板锁影响"""
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-Command", "Get-Clipboard -Raw"],
+            encoding="utf-8",
+            timeout=3
+        )
+        return out
+    except Exception:
+        return ""
+
+def get_edit_by_clipboard(hwnd):
+    win32clipboard.OpenClipboard()
+    win32clipboard.EmptyClipboard()
+    win32clipboard.CloseClipboard()
+    left,top,right,bottom=win32gui.GetWindowRect(hwnd)
+    x=(left+right)//2
+    y=(top+bottom)//2
+    win32api.SetCursorPos((x,y))
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP,0,0,0,0)
+    x=x+40
+    y=y+60
+    win32api.SetCursorPos((x,y))
+    time.sleep(0.1)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,0,0,0,0)
+    temp =  get_clip_powershell()
+    return temp
+
+def select_simulate_trade(select=trade_select):
     global pid,windows_hand
     run_trade_sefot()
     time.sleep(7)
@@ -388,7 +434,6 @@ def query_untrade_stock():
         print(f"untrade_stock:{list_temp}")
     #untrade_stock=list_temp
     return list_temp
-select_simulate_trade(trade_select)
 #print(query_untrade_stock())
 def cancel_trade_stock(id:str):
     global windows_hand,pid
@@ -445,7 +490,6 @@ def cancel_trade_stock(id:str):
             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0,0,0)
             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,0,0,0,0)
         c = c+1
-
 def query_account_information():
     global windows_hand,account_information
     windows_handle=windows_hand[1]
@@ -477,7 +521,6 @@ def query_account_information():
     account_information["当日盈亏"]  = get_windows_tile(windows_list[61])
     account_information["当日盈亏比"] = get_windows_tile(windows_list[63])
     print(f"account_information:{account_information}")
-
 def buy_sell_input_trade(stock_id:str, quantity:int, price:float):
     global pid
     windows_list = get_direct_child(windows_hand[1])
@@ -527,7 +570,6 @@ def buy_sell_input_trade(stock_id:str, quantity:int, price:float):
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,0,0,0,0)
     time.sleep(0.5)
     send_keys_to_edit(edit_list[2],quantity)
-
     left,top,right,bottom=win32gui.GetWindowRect(button_list[0])
     x=(left+right)//2
     y=(top+bottom)//2
@@ -578,4 +620,48 @@ def sell_stock(stock_id:str, quantity:int, price:float):
     time.sleep(2)
     buy_sell_input_trade(stock_id, quantity, price)
     return 0
-query_account_information()
+def query_stock_price(stock_id:str)->float:
+    global windows_hand
+    #top_handle = win32gui.GetForegroundWindow()
+    win32gui.ShowWindow(windows_hand[1],win32con.SW_MINIMIZE)
+    win32gui.ShowWindow(windows_hand[1],win32con.SW_RESTORE)
+    #if top_handle != windows_handle:
+    win32gui.SetForegroundWindow(windows_hand[1])
+    time.sleep(2)
+    move_window_to_center(windows_hand[1])
+    win32gui.SetWindowPos(windows_hand[1],win32con.HWND_TOPMOST,0,0,0,0,win32con.SWP_NOMOVE|win32con.SWP_NOSIZE)
+    time.sleep(0.5)
+    win32api.keybd_event(win32con.VK_F2,0,0,0)
+    time.sleep(0.05)
+    win32api.keybd_event(win32con.VK_F2,0,win32con.KEYEVENTF_KEYUP,0)
+    time.sleep(2)
+    #global pid
+    windows_list = get_direct_child(windows_hand[1])
+    windows_list = find_windows_classname(windows_list,"AfxMDIFrame")
+    windows_list = get_direct_child(windows_list[0])
+    windows_list = find_windows_classname(windows_list,"#32770")
+    windows_list = get_direct_child(windows_list[1])
+    edit_list = find_windows_classname(windows_list,"Edit")
+    button_list = find_windows_classname(windows_list,"Button")
+    left,top,right,bottom=win32gui.GetWindowRect(edit_list[0])
+    x=(left+right)//2
+    y=(top+bottom)//2
+    win32api.SetCursorPos((x,y))
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0,0,0)
+    time.sleep(0.05)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,0,0,0,0)
+    time.sleep(0.5)
+    send_keys_to_edit(edit_list[0],stock_id)
+    time.sleep(0.5)
+    left,top,right,bottom=win32gui.GetWindowRect(edit_list[1])
+    x=(left+right)//2
+    y=(top+bottom)//2
+    win32api.SetCursorPos((x,y))
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0,0,0)
+    time.sleep(0.3)
+    temp = float(get_edit_by_clipboard(edit_list[1]).strip())
+    return temp
